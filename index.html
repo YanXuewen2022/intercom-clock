@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>对讲延时测试时钟</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, -apple-system, sans-serif; background: #0b1220; color: #eef4ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; }
+    main { max-width: 1080px; margin: auto; }
+    h1 { font-size: 24px; margin: 0 0 8px; }
+    p { line-height: 1.65; }
+    .muted { color: #a5b5cc; }
+    .panel { background: #121e31; border: 1px solid #2b3b53; border-radius: 18px; padding: 24px; margin-top: 20px; }
+    .clock-panel { text-align: center; border: 4px solid #2b3b53; padding: 36px 12px; }
+    .clock-panel.flash { border-color: #5ef4c4; background: #173f3c; }
+    .zone { color: #9eb3cd; font-size: 16px; letter-spacing: 2px; }
+    .clock { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; font-size: clamp(38px, 9vw, 106px); font-weight: 700; margin: 16px 0; white-space: nowrap; line-height: 1.15; }
+    .millis { font-size: .55em; color: #5ef4c4; }
+    #date { color: #b9c8dc; }
+    .status { padding: 12px 16px; border-radius: 10px; margin-top: 16px; background: #18283e; line-height: 1.6; overflow-wrap: anywhere; }
+    .status[data-kind="ok"] { color: #82f2c8; }
+    .status[data-kind="warn"] { color: #ffd28b; }
+    .status[data-kind="error"] { color: #ffaaaa; }
+    .controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    label { display: flex; flex-direction: column; gap: 10px; font-size: 14px; color: #c3d1e3; }
+    select, button { font: inherit; border: 1px solid #405574; border-radius: 10px; color: #eef4ff; background: #1b2b43; min-height: 46px; padding: 10px 14px; }
+    select { width: 100%; }
+    button { cursor: pointer; }
+    button:hover:not(:disabled) { border-color: #92b4e6; }
+    button:focus-visible, select:focus-visible { outline: 3px solid #72bcff; outline-offset: 3px; }
+    button:disabled, select:disabled { opacity: .45; cursor: not-allowed; }
+    .primary { color: #09291f; background: #69e4bb; border-color: #69e4bb; font-weight: 700; }
+    .stop { color: #ffd2d2; border-color: #a76060; }
+    .buttons { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 22px; }
+    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 26px; }
+    .stats small { display: block; color: #a5b5cc; margin-bottom: 8px; }
+    .stats strong { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; font-size: clamp(18px, 2.5vw, 26px); }
+    .history h2 { margin: 0; font-size: 18px; }
+    .history-scroll { max-height: 320px; overflow: auto; }
+    .history table { width: 100%; border-collapse: collapse; text-align: left; }
+    .history th, .history td { padding: 12px; border-bottom: 1px solid #2b3b53; }
+    .history th { position: sticky; top: 0; background: #121e31; font-size: 14px; color: #a5b5cc; }
+    .history td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; font-size: 14px; white-space: nowrap; }
+    .notes { font-size: 14px; color: #a5b5cc; }
+    .notes li { line-height: 1.7; margin: 8px 0; }
+    a { color: #92c8ff; }
+    #wake-status { margin: 10px 0 0; min-height: 22px; font-size: 13px; }
+    @media (max-width: 650px) {
+      body { padding: 12px; }
+      .panel { padding: 18px 12px; }
+      .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .mode-setting { grid-column: 1 / -1; }
+      .stats { gap: 10px; }
+      .clock { font-size: clamp(26px, 8vw, 54px); }
+      .buttons button { flex: 1 1 140px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .clock-panel.flash { background: #121e31; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>对讲延时测试时钟</h1>
+    <p class="muted">当前北京时间 + 毫秒显示 + 定时中文播报。支持连续报数（1、2、3……）和时间秒数（0～59）两种模式。</p>
+
+    <section class="panel clock-panel" id="clock-panel" aria-label="北京时间">
+      <div class="zone">北京时间 · UTC+08:00</div>
+      <div class="clock"><span id="clock">--:--:--</span><span class="millis" id="millis">.---</span></div>
+      <div id="date">正在读取时间</div>
+    </section>
+
+    <div id="sync-status" class="status" data-kind="warn" role="status">仅使用本机时间，尚未网络校时。</div>
+    <div class="buttons">
+      <button id="sync">网络校时</button>
+      <button id="local">使用本机时间</button>
+      <button id="fullscreen">全屏显示</button>
+    </div>
+
+    <section class="panel" aria-label="报数设置">
+      <div class="controls">
+        <label class="mode-setting">报数模式
+          <select id="mode">
+            <option value="sequential" selected>连续报数（1、2、3……）</option>
+            <option value="seconds">时间秒数（0～59）</option>
+          </select>
+        </label>
+        <label>报数间隔
+          <select id="interval">
+            <option value="1">每 1 秒</option>
+            <option value="2">每 2 秒</option>
+            <option value="3">每 3 秒</option>
+            <option value="5" selected>每 5 秒</option>
+            <option value="10">每 10 秒</option>
+            <option value="15">每 15 秒</option>
+            <option value="20">每 20 秒</option>
+            <option value="30">每 30 秒</option>
+            <option value="60">每 60 秒</option>
+          </select>
+        </label>
+        <label>音量
+          <select id="volume">
+            <option value="0.3">低</option>
+            <option value="0.65" selected>中</option>
+            <option value="1">高</option>
+          </select>
+        </label>
+      </div>
+      <div class="buttons">
+        <button id="start" class="primary">开始定时报数</button>
+        <button id="stop" class="stop" disabled>停止</button>
+        <button id="preview">试报「1」</button>
+      </div>
+      <div id="audio-status" class="status" role="status">未开启报数。每 5 秒模式将在 :00、:05、:10 等时刻依次报数，不从点击时刻起算。</div>
+      <p id="wake-status" class="muted"></p>
+      <div class="stats">
+        <div><small>下一次报数</small><strong id="next">--:--:--</strong></div>
+        <div><small>最近报数（计划时间）</small><strong id="last">--:--:--</strong></div>
+        <div><small>当前报数</small><strong id="count">0</strong></div>
+      </div>
+    </section>
+
+    <section class="panel history" aria-labelledby="history-title">
+      <h2 id="history-title">本轮报数记录</h2>
+      <p id="history-note" class="notes">记录语音开始回调时的北京时间（含毫秒），不是计划时间，也不等于扬声器实际起音时刻。最新记录在前；停止后保留，重新开始时清空，试报不计入。</p>
+      <div class="history-scroll" tabindex="0" role="region" aria-label="报数记录列表">
+        <table aria-describedby="history-note">
+          <thead><tr><th scope="col">数字</th><th scope="col">报数开始时间（北京时间）</th></tr></thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+      <p id="history-empty" class="muted">尚无报数记录。</p>
+    </section>
+
+    <section class="panel notes">
+      <strong>用于测试时</strong>
+      <ol>
+        <li>用电脑打开本页，将电脑扬声器靠近运行对讲 APP 的手机麦克风。先试报并调整音量，再开启定时报数。</li>
+        <li>接收端也可打开本页，只看时间、不启动报数。两端先校时；这种方式只适合粗测，时钟偏差和电脑音频输出延迟也会进入结果。</li>
+        <li>需要准确延时，仍应在同一份录音中比较原声和设备播放声。不要把点击“开始”到设备发声的间隔当成传输延时。</li>
+      </ol>
+      <p>网络时间来自 <a href="https://timeapi.io" target="_blank" rel="noopener noreferrer">TimeAPI.io</a>（第三方服务，非官方标准授时）。页面会请求其 UTC 时间，选用三次采样中往返耗时最小的一次估算校正量。失败会明确提示；仅显示毫秒不代表毫秒级精度，RTT 也不是误差上限。</p>
+      <p>报数使用系统本地中文语音，不上传文本。页面按整秒触发语音合成，但合成启动和扬声器输出存在延迟，不能把计划时刻直接当作实际起音时刻。边框在收到语音开始回调时闪亮，该回调也不是声学测量。</p>
+      <p>连续报数模式每次重新开始都从 1 起报。时间秒数模式读取计划报数时刻的秒数，例如 14:21:05 报“5”、14:21:59 报“59”、14:22:00 报“0”；选择每 1 秒即可逐秒播报，选择每 5 秒则报 0、5、10……</p>
+      <p>保持本页在前台。切到后台、校时或切换时间来源会停止报数。前一个数字尚未读完或浏览器调度过晚时，会跳过本次时刻并提示，不积压语音；连续报数模式接着报下一个数字，时间秒数模式读取下一个报数时刻的秒数。</p>
+    </section>
+  </main>
+  <script>
+    "use strict";
+
+    const $ = (id) => document.getElementById(id);
+    const settings = ["mode", "interval", "volume"];
+    let clockBaseMs = Date.now();
+    let clockBaseMono = performance.now();
+    let syncInfo = null;
+    let syncFailure = "";
+    let syncing = false;
+    let speechVoice = null;
+    let activeSpeech = null;
+    let speechTimeout = null;
+    let running = false;
+    let starting = false;
+    let actionVersion = 0;
+    let scheduler = null;
+    let nextTarget = null;
+    let intervalMs = 5000;
+    let lastTarget = null;
+    let lastSpeechMono = null;
+    let count = 0;
+    let skipped = 0;
+    let wakeLock = null;
+
+    function clockNow() {
+      return clockBaseMs + performance.now() - clockBaseMono;
+    }
+
+    function clockParts(epochMs) {
+      const date = new Date(epochMs + 8 * 60 * 60 * 1000);
+      const pad = (value, width = 2) => String(value).padStart(width, "0");
+      return {
+        time: `${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`,
+        millis: `.${pad(date.getUTCMilliseconds(), 3)}`,
+        date: `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`
+      };
+    }
+
+    function nextBoundary(now, period, lead = 120) {
+      return Math.ceil((now + lead) / period) * period;
+    }
+
+    function message(id, text, kind = "") {
+      $(id).textContent = text;
+      $(id).dataset.kind = kind;
+    }
+
+    function errorText(error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+
+    function updateButtons() {
+      $("start").disabled = syncing || starting || running || activeSpeech !== null;
+      $("stop").disabled = !running && !starting && activeSpeech === null;
+      $("preview").disabled = syncing || starting || running || activeSpeech !== null;
+      $("sync").disabled = syncing;
+      $("local").disabled = syncing;
+      settings.forEach((id) => { $(id).disabled = running || starting || activeSpeech !== null; });
+    }
+
+    function updateSyncStatus() {
+      if (syncing) return;
+      if (!syncInfo) {
+        message("sync-status", `${syncFailure ? `网络校时失败：${syncFailure}。` : ""}仅使用本机时间，未网络校准。`, syncFailure ? "error" : "warn");
+        return;
+      }
+      const age = Math.max(0, Math.floor((performance.now() - syncInfo.sampleMono) / 1000));
+      const stale = age >= 600;
+      const prefix = syncFailure ? `本次校时失败：${syncFailure}；沿用上次结果。` : "";
+      message("sync-status",
+        `${prefix}${stale ? "校时结果已超过 10 分钟，建议重新校时。" : "已按第三方网络时间校时。"} UTC+08:00 · 本机校正 ${syncInfo.offset >= 0 ? "+" : ""}${Math.round(syncInfo.offset)} ms · RTT ${Math.round(syncInfo.rtt)} ms · ${age} 秒前采样（非精度保证）`,
+        syncFailure || stale ? "warn" : "ok");
+    }
+
+    function parseServerTime(data) {
+      const fields = ["year", "month", "day", "hour", "minute", "seconds", "milliSeconds"];
+      if (!data || data.timeZone !== "Etc/UTC" || fields.some((key) => !Number.isInteger(data[key]))) {
+        throw new Error("时间服务返回了无效数据");
+      }
+      const value = Date.UTC(data.year, data.month - 1, data.day, data.hour, data.minute, data.seconds, data.milliSeconds);
+      const date = new Date(value);
+      if (!Number.isFinite(value) || date.getUTCFullYear() !== data.year ||
+          date.getUTCMonth() + 1 !== data.month || date.getUTCDate() !== data.day ||
+          date.getUTCHours() !== data.hour || date.getUTCMinutes() !== data.minute ||
+          date.getUTCSeconds() !== data.seconds || date.getUTCMilliseconds() !== data.milliSeconds) {
+        throw new Error("时间服务返回了无效日期");
+      }
+      return value;
+    }
+
+    async function syncTime() {
+      if (syncing) return;
+      stopAudio("校时期间已停止报数，完成后请重新开启。");
+      syncing = true;
+      updateButtons();
+      const samples = [];
+      let failure = "时间服务不可用";
+      for (let index = 0; index < 3; index++) {
+        message("sync-status", `正在网络校时，采样 ${index + 1}/3…`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+        try {
+          const start = performance.now();
+          const response = await fetch(`https://timeapi.io/api/time/current/zone?timeZone=Etc%2FUTC&_=${Date.now()}-${index}`, {
+            signal: controller.signal, cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer"
+          });
+          if (!response.ok) throw new Error(`时间服务 HTTP ${response.status}`);
+          const data = await response.json();
+          const end = performance.now();
+          samples.push({ serverMs: parseServerTime(data), rtt: end - start, sampleMono: (start + end) / 2 });
+        } catch (error) {
+          failure = error.name === "AbortError" ? "请求超时" : errorText(error);
+          console.warn("Time synchronization sample failed:", error);
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+      if (samples.length) {
+        const best = samples.reduce((a, b) => a.rtt <= b.rtt ? a : b);
+        clockBaseMs = best.serverMs;
+        clockBaseMono = best.sampleMono;
+        syncInfo = { ...best, offset: clockNow() - Date.now() };
+        syncFailure = "";
+      } else {
+        syncFailure = failure;
+      }
+      syncing = false;
+      updateSyncStatus();
+      updateButtons();
+    }
+
+    async function prepareSpeech() {
+      if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
+        throw new Error("浏览器不支持语音报数，请使用新版 Chrome、Edge 或 Safari");
+      }
+      const findVoice = () => {
+        const voices = speechSynthesis.getVoices().filter((voice) => voice.localService && /^zh[-_]/i.test(voice.lang));
+        return voices.find((voice) => /CN|Hans/i.test(voice.lang)) || null;
+      };
+      speechVoice = findVoice();
+      if (!speechVoice) {
+        speechVoice = await new Promise((resolve) => {
+          const finish = (voice) => {
+            clearTimeout(timeout);
+            speechSynthesis.removeEventListener("voiceschanged", changed);
+            resolve(voice);
+          };
+          const changed = () => {
+            const voice = findVoice();
+            if (voice) finish(voice);
+          };
+          const timeout = setTimeout(() => finish(findVoice()), 3000);
+          speechSynthesis.addEventListener("voiceschanged", changed);
+          changed();
+        });
+      }
+      if (!speechVoice) throw new Error("未找到本地普通话语音，请先在系统设置中安装中文（普通话）语音");
+      speechSynthesis.resume();
+    }
+
+    function speakNumber(number, target = null) {
+      const utterance = new SpeechSynthesisUtterance(String(number));
+      utterance.voice = speechVoice;
+      utterance.lang = speechVoice.lang;
+      utterance.volume = Number($("volume").value);
+      utterance.rate = 1;
+      activeSpeech = utterance;
+      speechTimeout = setTimeout(() => {
+        if (activeSpeech === utterance) stopAudio("语音未能及时开始，已停止报数。请试报或检查系统语音设置。", "error");
+      }, 3000);
+      utterance.onstart = () => {
+        if (activeSpeech !== utterance) return;
+        clearTimeout(speechTimeout);
+        if (target !== null) {
+          count = number;
+          lastTarget = target;
+          lastSpeechMono = performance.now();
+          const spokenAt = clockParts(clockNow());
+          const row = document.createElement("tr");
+          const numberCell = document.createElement("td");
+          const timeCell = document.createElement("td");
+          numberCell.textContent = String(number);
+          timeCell.textContent = `${spokenAt.date} ${spokenAt.time}${spokenAt.millis}`;
+          row.append(numberCell, timeCell);
+          $("history-body").prepend(row);
+          $("history-empty").hidden = true;
+        }
+        speechTimeout = setTimeout(() => {
+          if (activeSpeech === utterance) stopAudio("语音长时间未结束，已停止报数。请检查系统语音设置。", "error");
+        }, 15000);
+      };
+      utterance.onend = () => {
+        if (activeSpeech !== utterance) return;
+        clearTimeout(speechTimeout);
+        activeSpeech = null;
+        if (target === null) message("audio-status", `试报「${number}」完成，不计入本轮报数。`);
+        updateButtons();
+      };
+      utterance.onerror = (event) => {
+        if (activeSpeech === utterance) stopAudio(`语音报数失败：${event.error}。请检查音频输出和系统中文语音。`, "error");
+      };
+      try {
+        speechSynthesis.speak(utterance);
+        updateButtons();
+      } catch (error) {
+        stopAudio(`语音报数失败：${errorText(error)}`, "error");
+      }
+    }
+
+    function scheduleUpcoming() {
+      if (!running) return;
+      const now = clockNow();
+      if (now < nextTarget) return;
+      // Speech cannot be scheduled ahead; skip late slots instead of queuing numbers.
+      if (now - nextTarget > 150) {
+        const replacement = nextBoundary(now, intervalMs, 120);
+        skipped += Math.round((replacement - nextTarget) / intervalMs);
+        nextTarget = replacement;
+        message("audio-status", `浏览器调度延迟，已跳过 ${skipped} 次报数时刻。本轮不宜用于精确测量。`, "warn");
+        return;
+      }
+      const target = nextTarget;
+      nextTarget += intervalMs;
+      if (activeSpeech !== null) {
+        skipped++;
+        message("audio-status", `上一数字尚未读完，已跳过 ${skipped} 次报数时刻，不积压语音。建议增大间隔。`, "warn");
+        return;
+      }
+      const number = $("mode").value === "seconds" ? new Date(target).getUTCSeconds() : count + 1;
+      speakNumber(number, target);
+    }
+
+    async function keepAwake() {
+      if (!("wakeLock" in navigator)) {
+        $("wake-status").textContent = "浏览器不支持屏幕常亮，请手动避免休眠。";
+        return;
+      }
+      try {
+        const lock = await navigator.wakeLock.request("screen");
+        if (!running) {
+          await lock.release();
+          return;
+        }
+        wakeLock = lock;
+        $("wake-status").textContent = "已请求屏幕常亮。";
+        lock.addEventListener("release", () => {
+          if (wakeLock === lock) {
+            wakeLock = null;
+            $("wake-status").textContent = running ? "屏幕常亮已被系统释放，请避免休眠。" : "";
+          }
+        });
+      } catch (error) {
+        $("wake-status").textContent = `无法保持屏幕常亮：${errorText(error)}。请手动避免休眠。`;
+      }
+    }
+
+    function stopAudio(text = "已停止报数。", kind = "") {
+      actionVersion++;
+      starting = false;
+      running = false;
+      clearInterval(scheduler);
+      scheduler = null;
+      clearTimeout(speechTimeout);
+      if (activeSpeech !== null) {
+        activeSpeech = null;
+        speechSynthesis.cancel();
+      }
+      nextTarget = null;
+      $("clock-panel").classList.remove("flash");
+      if (wakeLock) {
+        const lock = wakeLock;
+        wakeLock = null;
+        lock.release().catch((error) => {
+          $("wake-status").textContent = `释放屏幕常亮失败：${errorText(error)}`;
+        });
+      }
+      $("wake-status").textContent = "";
+      message("audio-status", text, kind);
+      updateButtons();
+    }
+
+    async function startAudio(preview = false) {
+      if (syncing || starting || running || activeSpeech !== null) return;
+      starting = true;
+      const version = ++actionVersion;
+      updateButtons();
+      try {
+        await prepareSpeech();
+        if (version !== actionVersion) return;
+        if (document.hidden) throw new Error("请在前台页面开启报数");
+        starting = false;
+        if (preview) {
+          const number = $("mode").value === "seconds" ? new Date(clockNow()).getUTCSeconds() : 1;
+          message("audio-status", `正在试报「${number}」，不计入本轮报数。`);
+          speakNumber(number);
+        } else {
+          intervalMs = Number($("interval").value) * 1000;
+          nextTarget = nextBoundary(clockNow(), intervalMs);
+          lastTarget = null;
+          lastSpeechMono = null;
+          count = 0;
+          skipped = 0;
+          $("history-body").replaceChildren();
+          $("history-empty").hidden = false;
+          running = true;
+          const sequence = $("mode").value === "seconds" ? "播报时间秒数（0～59）" : "依次报数：1、2、3……";
+          message("audio-status", `正在每 ${intervalMs / 1000} 秒${sequence}。语音：${speechVoice.name}。按整秒触发，实际起音受语音合成延迟影响。${syncInfo ? "" : "注意：当前未网络校时。"}`, syncInfo ? "ok" : "warn");
+          scheduleUpcoming();
+          scheduler = setInterval(scheduleUpcoming, 25);
+          keepAwake();
+        }
+      } catch (error) {
+        if (version === actionVersion) stopAudio(`无法开启声音：${errorText(error)}`, "error");
+      } finally {
+        if (version === actionVersion) {
+          starting = false;
+          updateButtons();
+        }
+      }
+    }
+
+    let lastStatusSecond = -1;
+    function render() {
+      const now = clockNow();
+      const parts = clockParts(now);
+      $("clock").textContent = parts.time;
+      $("millis").textContent = parts.millis;
+      $("date").textContent = parts.date;
+      $("clock-panel").classList.toggle("flash", running && lastSpeechMono !== null && performance.now() - lastSpeechMono < 180);
+      $("next").textContent = nextTarget === null ? "--:--:--" : clockParts(nextTarget).time;
+      $("last").textContent = lastTarget === null ? "--:--:--" : clockParts(lastTarget).time;
+      $("count").textContent = String(count);
+      const second = Math.floor(performance.now() / 1000);
+      if (second !== lastStatusSecond) {
+        updateSyncStatus();
+        lastStatusSecond = second;
+      }
+      requestAnimationFrame(render);
+    }
+
+    $("sync").addEventListener("click", syncTime);
+    $("local").addEventListener("click", () => {
+      stopAudio("已切换为本机时间，定时报数已停止。");
+      clockBaseMs = Date.now();
+      clockBaseMono = performance.now();
+      syncInfo = null;
+      syncFailure = "";
+      updateSyncStatus();
+    });
+    $("start").addEventListener("click", () => startAudio());
+    $("stop").addEventListener("click", () => stopAudio());
+    $("preview").addEventListener("click", () => startAudio(true));
+    $("mode").addEventListener("change", () => {
+      const secondsMode = $("mode").value === "seconds";
+      $("preview").textContent = secondsMode ? "试报当前秒数" : "试报「1」";
+      message("audio-status", secondsMode
+        ? "已选择时间秒数模式：例如 14:21:05 报“5”，到下一分钟报“0”。报数间隔保持不变，选择每 1 秒可逐秒播报。"
+        : "已选择连续报数模式：1、2、3……每次重新开始都从 1 起报。");
+    });
+    $("fullscreen").addEventListener("click", async () => {
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+        else throw new Error("当前浏览器不支持全屏");
+      } catch (error) {
+        message("audio-status", `全屏操作失败：${errorText(error)}`, "warn");
+      }
+    });
+    document.addEventListener("fullscreenchange", () => {
+      $("fullscreen").textContent = document.fullscreenElement ? "退出全屏" : "全屏显示";
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden && (running || starting || activeSpeech !== null)) {
+        stopAudio("页面已切到后台，报数自动停止。回到前台后请重新开启。", "warn");
+      }
+    });
+    window.addEventListener("pagehide", () => stopAudio());
+    render();
+    syncTime();
+  </script>
+</body>
+</html>
