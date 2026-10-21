@@ -45,6 +45,30 @@
     .history td { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; font-size: 14px; white-space: nowrap; }
     .notes { font-size: 14px; color: #a5b5cc; }
     .notes li { line-height: 1.7; margin: 8px 0; }
+    .test-guide { line-height: 1.75; }
+    .test-guide h2 { margin: 0; font-size: 22px; }
+    .test-guide h3 { margin: 24px 0 12px; font-size: 17px; }
+    .test-guide ol { padding-left: 24px; }
+    .test-guide li { margin: 12px 0; }
+    .test-guide code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+    .test-diagram { margin: 20px 0; padding: 20px; border: 1px solid #405574; border-radius: 14px; background: #0b1627; }
+    .diagram-layout { display: grid; grid-template-columns: minmax(0, 1fr) 100px minmax(0, 1fr); align-items: center; gap: 16px; }
+    .diagram-end { min-width: 0; padding: 16px; border: 1px solid #405574; border-radius: 12px; text-align: center; }
+    .diagram-end h4 { margin: 0 0 14px; font-size: 16px; color: #82f2c8; }
+    .diagram-device { padding: 14px 10px; border: 2px solid #6e88aa; border-radius: 10px; background: #18283e; }
+    .diagram-device strong, .diagram-device small { display: block; }
+    .diagram-device small { margin-top: 6px; color: #c3d1e3; font-size: 13px; }
+    .diagram-clock { display: block; margin: 8px 0; font-size: clamp(16px, 2vw, 22px); color: #82f2c8; white-space: nowrap; }
+    .diagram-down, .diagram-link { text-align: center; color: #c3d1e3; font-size: 13px; }
+    .diagram-down { margin: 8px 0; }
+    .diagram-arrow { display: block; color: #82f2c8; font-size: 32px; line-height: 1.2; }
+    .test-diagram figcaption { margin-top: 18px; color: #a5b5cc; font-size: 13px; text-align: center; }
+    .guide-warning { padding: 14px 16px; border-left: 4px solid #ffd28b; border-radius: 6px; background: #272b32; color: #ffe0af; }
+    .example-scroll { overflow-x: auto; }
+    .example-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .example-table th, .example-table td { padding: 12px; border-bottom: 1px solid #2b3b53; text-align: left; }
+    .example-table code { white-space: nowrap; }
+    .example-result { color: #82f2c8; font-weight: 700; }
     a { color: #92c8ff; }
     #wake-status { margin: 10px 0 0; min-height: 22px; font-size: 13px; }
     @media (max-width: 650px) {
@@ -55,6 +79,10 @@
       .stats { gap: 10px; }
       .clock { font-size: clamp(26px, 8vw, 54px); }
       .buttons button { flex: 1 1 140px; }
+      .test-diagram { padding: 14px; }
+      .diagram-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+      .diagram-link .diagram-arrow { transform: rotate(90deg); }
+      .example-table th, .example-table td { padding: 10px 6px; }
     }
     @media (prefers-reduced-motion: reduce) {
       .clock-panel.flash { background: #121e31; }
@@ -135,16 +163,90 @@
     </section>
 
     <section class="panel notes">
-      <strong>用于测试时</strong>
-      <ol>
-        <li>用电脑打开本页，将电脑扬声器靠近运行对讲 APP 的手机麦克风。先试报并调整音量，再开启定时报数。</li>
-        <li>接收端也可打开本页，只看时间、不启动报数。两端先校时；这种方式只适合粗测，时钟偏差和电脑音频输出延迟也会进入结果。</li>
-        <li>需要准确延时，仍应在同一份录音中比较原声和设备播放声。不要把点击“开始”到设备发声的间隔当成传输延时。</li>
-      </ol>
+      <strong>时间与播报说明</strong>
       <p>网络时间来自 <a href="https://timeapi.io" target="_blank" rel="noopener noreferrer">TimeAPI.io</a>（第三方服务，非官方标准授时）。页面会请求其 UTC 时间，选用三次采样中往返耗时最小的一次估算校正量。失败会明确提示；仅显示毫秒不代表毫秒级精度，RTT 也不是误差上限。</p>
       <p>报数使用系统本地中文语音，不上传文本。页面按整秒触发语音合成，但合成启动和扬声器输出存在延迟，不能把计划时刻直接当作实际起音时刻。边框在收到语音开始回调时闪亮，该回调也不是声学测量。</p>
       <p>连续报数模式每次重新开始都从 1 起报。时间秒数模式读取计划报数时刻的秒数，例如 14:21:05 报“5”、14:21:59 报“59”、14:22:00 报“0”；选择每 1 秒即可逐秒播报，选择每 5 秒则报 0、5、10……</p>
       <p>保持本页在前台。切到后台、校时或切换时间来源会停止报数。前一个数字尚未读完或浏览器调度过晚时，会跳过本次时刻并提示，不积压语音；连续报数模式接着报下一个数字，时间秒数模式读取下一个报数时刻的秒数。</p>
+    </section>
+
+    <section class="panel test-guide" id="test-guide" aria-labelledby="test-guide-title">
+      <h2 id="test-guide-title">怎么用这个网页测试对讲延时</h2>
+      <p class="muted">测量方向：声音进入 APP 手机麦克风 → 从被测设备扬声器播放。下面的“网页时间＋录屏”方法用于粗测，不需要声卡，不能作为毫秒级精确测量。</p>
+
+      <h3>1. 按图摆放</h3>
+      <p>准备一台电脑、运行对讲 APP 的手机 A、被测设备，以及用于录屏的手机 B。手机 A 与被测设备相距 10m 以上，并连接同一 Wi-Fi；电脑放在手机 A 旁，手机 B 放在设备扬声器旁。</p>
+      <figure class="test-diagram" aria-labelledby="diagram-caption">
+        <div class="diagram-layout">
+          <div class="diagram-end">
+            <h4>发送端 · 开启网页报数</h4>
+            <div class="diagram-device">
+              <strong>电脑：打开本网页</strong>
+              <code class="diagram-clock">14:30:20.180</code>
+              <small>说出“二十” · 保留发送记录</small>
+            </div>
+            <div class="diagram-down"><span class="diagram-arrow" aria-hidden="true">↓</span>扬声器靠近手机麦克风</div>
+            <div class="diagram-device">
+              <strong>手机 A：运行对讲 APP</strong>
+              <small>拉流成功 → 开启对讲 → 采集报数</small>
+            </div>
+          </div>
+          <div class="diagram-link">
+            对讲音频
+            <span class="diagram-arrow" aria-hidden="true">→</span>
+            同一 Wi-Fi<br>两端相距 &gt;10m
+          </div>
+          <div class="diagram-end">
+            <h4>接收端 · 网页不报数</h4>
+            <div class="diagram-device">
+              <strong>被测设备：扬声器</strong>
+              <small>播放手机 A 传来的“二十”</small>
+            </div>
+            <div class="diagram-down"><span class="diagram-arrow" aria-hidden="true">↓</span>手机 B 麦克风录下设备声音</div>
+            <div class="diagram-device">
+              <strong>手机 B：本网页＋系统录屏</strong>
+              <code class="diagram-clock">14:30:20.650</code>
+              <small>只显示时钟 · 录屏开启麦克风</small>
+            </div>
+          </div>
+        </div>
+        <figcaption id="diagram-caption">摆放与声音传输示意图。图中时间仅为计算示例，不是实时时钟；同一 Wi-Fi 不代表对讲一定走局域网直连。</figcaption>
+      </figure>
+      <p class="guide-warning"><strong>接收端不要点击“开始定时报数”。</strong>两端网页独立运行，不会同步开始／停止状态或记录。手机 B 应当只录到被测设备播放的声音，不要让它自己报数。</p>
+
+      <h3>2. 开始采样</h3>
+      <ol>
+        <li><strong>两端校时：</strong>电脑和手机 B 都打开本页，等待网络校时成功。若显示失败或仅使用本机时间，不要直接用两端网页时间相减判断延时。</li>
+        <li><strong>设置发送端：</strong>电脑选择“时间秒数（0～59）”，间隔先选“每 5 秒”。点击“试报当前秒数”，确认普通话语音正常、音量清楚且不失真。</li>
+        <li><strong>开启对讲：</strong>手机 A 拉流成功后开启对讲。不要在这台 APP 手机上同时运行报数网页或录音，以免切后台或麦克风占用影响对讲。</li>
+        <li><strong>接收端录屏：</strong>手机 B 使用系统录屏，并启用麦克风录音，同时录下网页时钟和设备声音。先录一小段确认声音确实被录入；如系统不支持，请用另一台设备拍摄手机 B 的时钟并录下设备声音。接收端网页保持前台，避免锁屏。</li>
+        <li><strong>发送端开始：</strong>电脑点击“开始定时报数”，连续采样约 2 分钟。结束时点击“停止”，保留或截图发送端的“本轮报数记录”；不要刷新页面或重新开始，否则记录会清空。</li>
+      </ol>
+
+      <h3>3. 找到同一次报数，计算时间差</h3>
+      <p>回放手机 B 的录屏，找到设备<strong>开始说出</strong>某个数字的时刻，读取画面中的网页时间；再查电脑记录列表中同一次报数的开始时间。不要等整个数字读完，也不要用点击“开始”的时间计算。</p>
+      <div class="example-scroll">
+        <table class="example-table">
+          <caption>示例：设备播放“20”（假设两端日期相同）</caption>
+          <thead><tr><th scope="col">数据来源</th><th scope="col">时间</th></tr></thead>
+          <tbody>
+            <tr><td>电脑列表：“20”的语音开始回调</td><td><code>14:30:20.180</code></td></tr>
+            <tr><td>手机 B 录屏：设备声音起点的网页时间</td><td><code>14:30:20.650</code></td></tr>
+            <tr><td class="example-result">估计延时：接收时间 − 发送记录时间</td><td class="example-result"><code>470 ms</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="notes">秒数每分钟重复一次，配对时要核对完整日期、时分秒和前后数字，避免把两分钟中的同一个数字配错。不要直接拿接收时间减去整秒（如 20.000），因为语音实际启动不一定在整秒。</p>
+      <p class="guide-warning"><strong>470ms 是估计值，不是纯对讲链路的精确延时。</strong>两端时钟偏差、语音开始回调与实际出声的差异、声音的空气传播，以及录屏音画同步误差都会影响结果。毫秒显示和校时 RTT 均不代表测量精度。</p>
+
+      <h3>4. 怎么记录结果</h3>
+      <p>至少配对 20 次，统计中位数和最大值；首次开讲单独记录，观察是否吞字。长时间对讲可在第 1、5、10 分钟分别采样，检查是否越讲越慢。漏音、卡顿也要单独记录，不能只保留成功样本。比较不同版本时，固定位置、音量、网络和报数间隔。</p>
+      <p class="notes">如果网页提示“上一数字尚未读完”或“浏览器调度延迟”，说明该次发送时刻被网页跳过，不能直接判断为设备丢音；先增大间隔或改善电脑运行状态再测。需要区分“网页没发出”和“设备没收到”时，还应录下发送端的实际声音。</p>
+
+      <h3>更可靠的版本对比：一份录音，两个声音</h3>
+      <p>在安静、回声较少且原声能传到中间的位置，把一部录音手机放在<strong>电脑扬声器与设备扬声器的等距位置</strong>，同时录下电脑原声和设备播放声。网页仍作为报数音源，不需要接收端时钟。</p>
+      <p><strong>对讲延时 ≈ 同一录音中设备声起点 − 电脑原声起点。</strong>用 Audacity 等音频工具放大波形，对应同一个数字的起音点。等距摆放能基本抵消两路声音到录音点的传播时间，避免两台网页时钟和语音回调的误差；电脑扬声器仍应紧邻手机 A 的麦克风。</p>
+      <p class="notes">先关闭对讲录一段，确认不会把回声当成设备播放声。两边必须都录清楚且能区分；若距离不等、声音重叠或原声太弱，这个简化方法也不可靠，不能据此宣称毫秒级精度。</p>
     </section>
   </main>
   <script>
